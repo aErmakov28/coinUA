@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Особистий кабінет — CoinUA</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#account">Перейти до вмісту</a>
+
+  <header class="site-header">
+    <div class="container header-top">
+      <a href="./" class="logo">coinUA/<span>atlas</span></a>
+      <nav class="account account-nav-top" aria-label="Навігація">
+        <a href="./" class="link-btn" style="display:inline-flex;align-items:center;text-decoration:none">← До каталогу</a>
+        <span data-auth-slot class="auth-slot"></span>
+        <a href="./#cart" class="btn btn-primary">Кошик · <span id="cartCount">0</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container page" id="account">
+    <p class="crumbs">Каталог / Особистий кабінет</p>
+    <div id="accountRoot" aria-live="polite">
+      <p style="color:var(--muted)">Завантаження…</p>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <span class="logo">coinUA/<span>atlas</span></span>
+      <span>Особистий кабінет</span>
+    </div>
+  </footer>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/account.js"></script>
+</body>
+</html>

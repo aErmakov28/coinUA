@@ -41,12 +41,50 @@
     owned: new Set(store.get('owned', []))
   };
 
+  /* Обране та колекція: у гостя — в localStorage, у користувача — в його акаунті. */
+  const Auth = window.Auth;
+  const loggedIn = () => !!(Auth && Auth.user);
+  let syncTimer;
+
   const persist = () => {
     store.set('cart', state.cart);
-    store.set('fav', [...state.fav]);
-    store.set('owned', [...state.owned]);
     store.set('view', state.view);
+    if (loggedIn()) {
+      clearTimeout(syncTimer);
+      syncTimer = setTimeout(() => {
+        Auth.updateData({ fav: [...state.fav], owned: [...state.owned] })
+          .catch((e) => toast('Не вдалося зберегти: ' + e.message));
+      }, 400);
+    } else {
+      store.set('fav', [...state.fav]);
+      store.set('owned', [...state.owned]);
+    }
   };
+
+  if (Auth) {
+    Auth.on((user, event) => {
+      if (event === 'data' || event === 'profile') return; // наші власні збереження
+      if (user) {
+        // Переносимо в акаунт те, що гість встиг додати до входу.
+        const guestFav = store.get('fav', []);
+        const guestOwned = store.get('owned', []);
+        state.fav = new Set([...(user.data.fav || []), ...guestFav]);
+        state.owned = new Set([...(user.data.owned || []), ...guestOwned]);
+        if (guestFav.length || guestOwned.length) {
+          store.set('fav', []);
+          store.set('owned', []);
+          persist();
+        }
+      } else {
+        state.fav = new Set(store.get('fav', []));
+        state.owned = new Set(store.get('owned', []));
+        state.onlyFav = false;
+        state.onlyOwned = false;
+      }
+      refresh();
+      if (cartOpen && cartStep === 'checkout') renderCart();
+    });
+  }
 
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -441,12 +479,18 @@
     }
 
     // Крок оформлення
+    const u = loggedIn() ? Auth.user : null;
+    const d = (u && u.data) || {};
+    const phoneVal = d.contactPhone || (u && u.phone ? Auth.formatPhone(u.phone) : '');
     $('#drawerTitle').textContent = 'Оформлення';
     el.innerHTML = `
+      ${u
+        ? `<p class="auth-note" style="margin:0">Замовлення збережеться в <a href="account.html#orders">особистому кабінеті</a>.</p>`
+        : `<p class="auth-note" style="margin:0">Є акаунт? <button type="button" class="link-btn accent" data-open-auth="login" style="min-height:0;padding:0">Увійдіть</button>, щоб дані заповнилися самі, а замовлення з’явилося в кабінеті.</p>`}
       <form class="form" id="checkoutForm" novalidate>
-        <label class="field">Ім’я та прізвище<input name="name" required autocomplete="name" placeholder="Ім’я Прізвище"></label>
-        <label class="field">Телефон<input name="phone" type="tel" required autocomplete="tel" placeholder="+380 XX XXX XX XX" pattern="\\+?[0-9 ]{10,17}"></label>
-        <label class="field">Ел. пошта (необов’язково)<input name="email" type="email" autocomplete="email" placeholder="you@example.com"></label>
+        <label class="field">Ім’я та прізвище<input name="name" required autocomplete="name" placeholder="Ім’я Прізвище" value="${esc(u ? u.name : '')}"></label>
+        <label class="field">Телефон<input name="phone" type="tel" required autocomplete="tel" placeholder="+380 XX XXX XX XX" pattern="\\+?[0-9 ]{10,17}" value="${esc(phoneVal)}"></label>
+        <label class="field">Ел. пошта (необов’язково)<input name="email" type="email" autocomplete="email" placeholder="you@example.com" value="${esc(u && u.email ? u.email : '')}"></label>
         <fieldset class="radio-group">
           <legend>Доставка</legend>
           <label class="radio"><input type="radio" name="delivery" value="np" checked> Нова Пошта — відділення</label>
@@ -455,8 +499,9 @@
           <label class="radio"><input type="radio" name="delivery" value="pickup"> Самовивіз із шоуруму</label>
         </fieldset>
         <div id="addressFields" class="form">
-          <label class="field">Місто<input name="city" required autocomplete="address-level2" placeholder="Київ"></label>
-          <label class="field">Відділення або адреса<input name="branch" required placeholder="№ відділення"></label>
+          <label class="field">Місто<input name="city" required autocomplete="address-level2" placeholder="Київ" value="${esc(d.city || '')}"></label>
+          <label class="field">Відділення або адреса<input name="branch" required placeholder="№ відділення" value="${esc(d.branch || '')}"></label>
+          ${u ? '<label class="check"><input type="checkbox" name="saveAddress" checked> Зберегти адресу в профілі</label>' : ''}
         </div>
         <fieldset class="radio-group">
           <legend>Оплата</legend>
@@ -475,7 +520,34 @@
     form.city.required = !pickup;
     form.branch.required = !pickup;
     if (!form.reportValidity()) return;
-    const order = 'CU-' + Date.now().toString().slice(-6);
+    const labelOf = (name) => {
+      const input = form.querySelector(`input[name="${name}"]:checked`);
+      return input ? input.parentElement.textContent.trim() : '';
+    };
+    const order = {
+      id: 'CU-' + Date.now().toString().slice(-6),
+      date: new Date().toISOString(),
+      status: 'Прийнято',
+      items: Object.entries(state.cart).map(([id, qty]) => {
+        const it = byId.get(id);
+        return { id, code: it.code, name: it.name, qty, price: it.price };
+      }),
+      total: cartTotal(),
+      delivery: labelOf('delivery'),
+      payment: labelOf('pay'),
+      address: pickup ? '' : [form.city.value.trim(), form.branch.value.trim()].filter(Boolean).join(', ')
+    };
+
+    if (loggedIn()) {
+      const d = Auth.user.data || {};
+      const patch = { orders: [order, ...(d.orders || [])].slice(0, 50), contactPhone: form.phone.value.trim() };
+      if (!pickup && form.saveAddress && form.saveAddress.checked) {
+        patch.city = form.city.value.trim();
+        patch.branch = form.branch.value.trim();
+      }
+      Auth.updateData(patch).catch((e) => toast('Замовлення не збережено в кабінеті: ' + e.message));
+    }
+
     state.cart = {};
     persist();
     cartStep = 'done';
@@ -483,8 +555,9 @@
     $('#cartContent').innerHTML = `
       <div class="success">
         <div class="check-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M5 12l5 5 9-10"/></svg></div>
-        <h3 style="margin:0;font-size:22px">Замовлення ${order} прийнято</h3>
+        <h3 style="margin:0;font-size:22px">Замовлення ${order.id} прийнято</h3>
         <p style="margin:0;color:var(--muted)">Менеджер зателефонує для підтвердження. Це демо-версія: замовлення нікуди не надсилається.</p>
+        ${loggedIn() ? '<a class="btn btn-primary" href="account.html#orders">Мої замовлення</a>' : ''}
         <button type="button" class="btn btn-outline" data-cart="close">Продовжити покупки</button>
       </div>`;
     refresh();
@@ -660,4 +733,5 @@
 
   $('#sort').value = state.sort;
   renderAll();
+  if (location.hash === '#cart') { history.replaceState(null, '', location.pathname); openCart(); }
 })();
